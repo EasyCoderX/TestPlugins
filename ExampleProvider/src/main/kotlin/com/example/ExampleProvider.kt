@@ -8,6 +8,7 @@ import com.lagradost.cloudstream3.amap
 import com.lagradost.cloudstream3.utils.*
 import kotlinx.coroutines.runBlocking
 import org.jsoup.nodes.Element
+import org.jsoup.Jsoup
 
 class Samehadaku : MainAPI() {
 
@@ -72,7 +73,7 @@ class Samehadaku : MainAPI() {
 
             }
             return newHomePageResponse(
-                HomePageList(request.name, home, true),
+                HomePageList(request.name, home, false),
                 hasNext = false
             )
 
@@ -109,12 +110,12 @@ class Samehadaku : MainAPI() {
             }
 
             return newHomePageResponse(
-                HomePageList(request.name, home, true),
+                HomePageList(request.name, home, false),
                 hasNext = home.isNotEmpty()
             )
         }
 
-        val document = app.get("$mainUrl/${request.data}daftar-anime-2/page/$page").document
+        val document = app.get("${request.data}page/$page").document
         val home = document.select("div.animposx").mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(
@@ -239,6 +240,8 @@ class Samehadaku : MainAPI() {
         }
     }
 
+    // saat berada di bagian play episode tertentu
+
     override suspend fun loadLinks(
         data: String,
         isCasting: Boolean,
@@ -246,21 +249,74 @@ class Samehadaku : MainAPI() {
         callback: (ExtractorLink) -> Unit
     ): Boolean {
 
-        app.get(data).document
-            .select("div#downloadb li")
-            .amap { li ->
-                val quality = li.select("strong").text()
-                li.select("a").amap { a ->
-                    loadFixedExtractor(
-                        fixUrl(a.attr("href")),
-                        quality,
-                        subtitleCallback,
-                        callback
+        // 1. Ambil dokumen HTML utama
+        val document = app.get(data).document
+
+        // =======================================================================
+        // BAGIAN 1: Mengambil Link Download (Paralel)
+        // =======================================================================
+        document.select("div#downloadb li").amap { li ->
+            val quality = li.select("strong").text()
+            li.select("a").amap { a ->
+                loadFixedExtractor(
+                    fixUrl(a.attr("href")),
+                    quality,
+                    subtitleCallback,
+                    callback
+                )
+            }
+        }
+
+        // =======================================================================
+        // BAGIAN 2: Mengambil Link Streaming (Translasi Sempurna dari Python)
+        // BELUM WORK
+        // =======================================================================
+        document.select("div.east_player_option").amap { playerBtn ->
+            val postId = playerBtn.attr("data-post")
+            val nume = playerBtn.attr("data-nume")
+            val type = playerBtn.attr("data-type")
+            
+            // Trik dari Python: Ambil nama dari <span> agar aman dari HTML yang rusak
+            val serverName = playerBtn.selectFirst("span")?.text()?.trim() ?: "Server"
+
+            if (postId.isNotEmpty() && nume.isNotEmpty()) {
+                val ajaxUrl = fixUrl("/wp-admin/admin-ajax.php")
+
+                // Eksekusi POST request secara paralel
+                val responseText = app.post(
+                    url = ajaxUrl,
+                    data = mapOf(
+                        "action" to "player_ajax",
+                        "post" to postId,
+                        "nume" to nume,
+                        "type" to type
+                    ),
+                    headers = mapOf(
+                        "X-Requested-With" to "XMLHttpRequest",
+                        "Referer" to data // Penting: Tambahkan data (URL asli) sebagai Referer
+                    )
+                ).text
+
+                // Ambil URL dari iframe
+                val iframeUrl = Jsoup.parse(responseText).selectFirst("iframe")?.attr("src")
+
+                if (!iframeUrl.isNullOrEmpty()) {
+                    // Serahkan URL iframe ke sistem Cloudstream untuk diekstrak menjadi .mp4
+                    loadExtractor(
+                        url = fixUrl(iframeUrl),
+                        referer = data,
+                        subtitleCallback = subtitleCallback,
+                        callback = callback
                     )
                 }
             }
+        }
+
         return true
     }
+
+
+    
 
     private suspend fun loadFixedExtractor(
         url: String,
