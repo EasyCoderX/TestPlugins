@@ -16,7 +16,7 @@ class Samehadaku : MainAPI() {
     }
 
     override var mainUrl = "https://v2.samehadaku.how"
-    override var name = "Samehadaku⛩️"
+    override var name = "Samehadaku"
     override var lang = "id"
     override val hasMainPage = true
     override val hasDownloadSupport = true
@@ -24,14 +24,18 @@ class Samehadaku : MainAPI() {
     override val supportedTypes = setOf(
         TvType.Anime,
         TvType.AnimeMovie,
-        TvType.OVA
+        TvType.OVA,
+        TvType.Movie,     // TAMBAHKAN INI
+        TvType.TvSeries,  // TAMBAHKAN INI
+        TvType.Cartoon    // TAMBAHKAN INI
     )
 
     override val mainPage = mainPageOf(
-        "$mainUrl/page/" to "Episode Terbaru",
-        "daftar-anime-2/?title=&status=&type=TV&order=popular&page=" to "TV Populer",
-        "daftar-anime-2/?title=&status=&type=OVA&order=title&page=" to "OVA",
-        "daftar-anime-2/?title=&status=&type=Movie&order=title&page=" to "Movie"
+        // "$mainUrl/page/" to "Episode Terbaru",
+        // "daftar-anime-2/?title=&status=&type=TV&order=popular&page=" to "TV Populer",
+        // "daftar-anime-2/?title=&status=&type=OVA&order=title&page=" to "OVA",
+        // "daftar-anime-2/?title=&status=&type=Movie&order=title&page=" to "Movie"
+        "$mainUrl/anime-terbaru/" to "Episode Terbaru"
     )
 
     override suspend fun getMainPage(
@@ -42,7 +46,7 @@ class Samehadaku : MainAPI() {
         
 
         if (request.name == "Episode Terbaru") {
-            val document = app.get("${request.data}$page").document
+            val document = app.get("${request.data}page/$page/").document
 
             val home = document.select("div.post-show ul li").mapNotNull { li ->
                 val a = li.selectFirst("a") ?: return@mapNotNull null
@@ -82,6 +86,7 @@ class Samehadaku : MainAPI() {
             hasNext = home.isNotEmpty()
         )
     }
+
 
     private fun Element.toSearchResult(): AnimeSearchResponse? {
         val a = selectFirst("a") ?: return null
