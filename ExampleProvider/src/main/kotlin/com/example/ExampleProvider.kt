@@ -35,13 +35,48 @@ class Samehadaku : MainAPI() {
         // "daftar-anime-2/?title=&status=&type=TV&order=popular&page=" to "TV Populer",
         // "daftar-anime-2/?title=&status=&type=OVA&order=title&page=" to "OVA",
         // "daftar-anime-2/?title=&status=&type=Movie&order=title&page=" to "Movie"
-        "$mainUrl/anime-terbaru/" to "Episode Terbaru"
+        "$mainUrl/" to "Top 10 minggu ini",
+        "$mainUrl/anime-terbaru/" to "Episode Terbaru",
+        "$mainUrl/daftar-anime-2/" to "Daftar Anime"
     )
 
     override suspend fun getMainPage(
         page: Int,
         request: MainPageRequest
     ): HomePageResponse {
+        if (request.name == "Top 10 minggu ini") {
+            val document = app.get("${request.data}").document
+            val home = document.select("div.topten-animesu ul li").mapNotNull { li ->
+                val a = li.selectFirst("a") ?: return@mapNotNull null
+
+                val rawTitle = a.selectFirst("span.judul")?.text()?.ifBlank { "tak ditemukan" } ?: "tak ditemukan"
+
+                val title = rawTitle
+                    .replace(Regex("(Episode|Ep)\\s*\\d+", RegexOption.IGNORE_CASE), "")
+                    .removeBloat()
+                    .trim() 
+
+                val href = fixUrl(a.attr("href"))
+                val poster = fixUrlNull(a.selectFirst("img")?.attr("src"))
+
+                val ep = Regex("(Episode|Ep)\\s*(\\d+)", RegexOption.IGNORE_CASE)
+                    .find(li.text())
+                    ?.groupValues
+                    ?.getOrNull(2)
+                    ?.toIntOrNull()
+
+                newAnimeSearchResponse(title, href, TvType.Anime) {
+                    posterUrl = poster
+                    addSub(ep)
+                }
+
+            }
+            return newHomePageResponse(
+                HomePageList(request.name, home, true),
+                hasNext = false
+            )
+
+        }
 
         
 
@@ -70,6 +105,7 @@ class Samehadaku : MainAPI() {
                     posterUrl = poster
                     addSub(ep)
                 }
+                
             }
 
             return newHomePageResponse(
@@ -78,7 +114,7 @@ class Samehadaku : MainAPI() {
             )
         }
 
-        val document = app.get("$mainUrl/${request.data}$page").document
+        val document = app.get("$mainUrl/${request.data}daftar-anime-2/page/$page").document
         val home = document.select("div.animposx").mapNotNull { it.toSearchResult() }
 
         return newHomePageResponse(
@@ -87,7 +123,7 @@ class Samehadaku : MainAPI() {
         )
     }
 
-
+    // hasil ketika mealkukan search dengan search bar
     private fun Element.toSearchResult(): AnimeSearchResponse? {
         val a = selectFirst("a") ?: return null
 
@@ -98,10 +134,15 @@ class Samehadaku : MainAPI() {
         val href = fixUrl(a.attr("href"))
         val poster = fixUrlNull(selectFirst("img")?.attr("src"))
 
+        
         val type = when {
-            href.contains("/ova/", true) -> TvType.OVA
-            href.contains("/movie/", true) -> TvType.AnimeMovie
+            a.selectFirst("div.type.Movie") != null -> TvType.AnimeMovie
+            a.selectFirst("div.type.OVA") != null -> TvType.OVA
             else -> TvType.Anime
+
+            // href.contains("/ova/", true) -> TvType.OVA
+            // href.contains("/movie/", true) -> TvType.AnimeMovie
+            // else -> TvType.Anime
         }
 
         return newAnimeSearchResponse(title.trim(), href, type) {
@@ -116,6 +157,7 @@ class Samehadaku : MainAPI() {
             .mapNotNull { it.toSearchResult() }
     }
 
+    // load hasil setelah klik sebuah poster anime
     override suspend fun load(url: String): LoadResponse? {
         val document = app.get(url).document
 
@@ -133,17 +175,28 @@ class Samehadaku : MainAPI() {
             ?.let { Regex("\\d{4}").find(it)?.value?.toIntOrNull() }
 
         val status = when (
-            document.selectFirst("div.spe span:contains(Status)")?.ownText()
+            document.selectFirst("div.spe span:contains(Status)")?.ownText()?.trim()
         ) {
             "Ongoing" -> ShowStatus.Ongoing
             else -> ShowStatus.Completed
         }
 
-        val type = when {
-            url.contains("/ova/", true) -> TvType.OVA
-            url.contains("/movie/", true) -> TvType.AnimeMovie
+
+
+
+        val type = when (
+            document.selectFirst("div.spe span:contains(Type)")?.ownText()?.trim()
+            // url.contains("/ova/", true) -> TvType.OVA
+            // url.contains("/movie/", true) -> TvType.AnimeMovie
+            // else -> TvType.Anime
+        ) {
+            "Movie" -> TvType.AnimeMovie
+            "OVA" -> TvType.OVA
             else -> TvType.Anime
         }
+
+
+
 
         val trailer = document
             .selectFirst("iframe[src*=\"youtube\"]")
@@ -151,7 +204,7 @@ class Samehadaku : MainAPI() {
 
         val episodes = document.select("div.lstepsiode ul li")
             .mapNotNull {
-                val a = it.selectFirst("a") ?: return@mapNotNull null
+                val a = it.selectFirst(".lchx a") ?: return@mapNotNull null
 
                 val ep = Regex("(Episode|Ep)\\s*(\\d+)", RegexOption.IGNORE_CASE)
                     .find(a.text())
